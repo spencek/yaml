@@ -1,0 +1,801 @@
+swagger: '2.0'
+info:
+  version: '1.0'
+  title: Qume Sandbox API Documentation
+  description: >-
+
+    # Overview
+
+    > Qume provides APIs for accessing exchange features programmatically. By
+    querying REST endpoints and/or connecting to WebSocket channels, developers
+    can implement custom trading systems in any programming language capable of
+    managing HTTP requests.
+
+
+    Authenticated REST endpoints are used for transactional operations, such as:
+      - Placing and cancelling orders 
+      - Managing positions
+      - Querying historical data
+      - Modifying leverage
+
+    WebSocket channels provide real-time streams of information, including:
+      - *Level-1* and *Level-2* order book data
+      - Market statistics
+
+    # REST API
+
+    ## Creating an API Key
+
+    To use the REST API, you must generate a pair of unique API keys on the
+    “Accounts” page of the sandbox website.  Your *Public Key, Secret Key*, and
+    *Passphrase* only appear once, so make sure they are safely stored before
+    exiting the page.
+
+
+    Example key generation output:
+      
+      - *Public Key*: ```“d284cb87-0b27-47f9-a82d-c43173ea7c87”```
+      - *Secret Key*: ```“9ed4c73db9abae81d72f53e14cc4e842”```
+      - *Passphrase*: ```“example_passphrase”```
+
+    ## Authentication Headers
+
+    REST operations all require authentication. To authenticate a request, you
+    must supply four HTTP headers: 
+      
+      - ```X-QUME-SIGNATURE```: See [Generate Authentication String](#/introduction/rest-api/generate-authentication-string).
+      - ```X-QUME-TIMESTAMP```: The Unix timestamp (also called Unix epoch or Unix time) in milliseconds. The server will deny requests with a timestamp that is more than 10 seconds old.
+      - ```X-QUME-PASSPHRASE```: The unique passphrase that you chose in order to generate your API keys.
+      - ```X-QUME-API-KEY```: Your Public API Key. 
+
+    ## Generate Authentication String
+
+    In order to generate ```X-QUME-SIGNATURE```, you must perform the following
+    steps:
+
+      1. Concatenate *request body + Unix timestamp + path*.
+      
+          <br>
+      
+          *Example Output*: ```{“foo”:”bar”}1538524732000/v1/orders```
+          
+          <br>
+          
+      3. Generate a HMAC-SHA-256 using the result from step 1 and your API Secret Key. 
+      4. Hex-encode the output.
+      
+      **NOTES** 
+      - All request bodies should be valid JSON with content type ```application/json```
+      - If the request body is ```{}```, treat it as an empty string
+      - Include the ```/v1``` prefix in the path
+      - The Unix timestamp must be in milliseconds
+      
+    ## Example
+      
+    A shell script for placing a limit order via REST with authentication:
+        
+      ```
+      #!/bin/bash
+      pubkey="$YOUR_PUBLIC_API_KEY_HERE"
+      privkey="$YOUR_PRIVATE_API_KEY_HERE"
+      pass="$YOUR_API_KEY_PASSPHRASE_HERE"
+      
+      timestamp="$(($(date +'%s') * 1000))"
+      body='{ "symbol": "BTCUSDQ", "side": "BUY", "qty": 100, "price": 1000.5, "type": "LIMIT", "timeInForce": "UNTIL_CANCEL", "postOnly": false }'
+      path='/v1/orders'
+      
+      message=$(printf '%s%s%s' "$body" "$timestamp" "$path")
+      
+      sig=$(printf '%s' "$message" | openssl dgst -sha256 -hmac "$privkey" -binary | od -A n -t x1 | tr -d '\n ')
+      
+      curl "https://api.qume.io${path}" 
+        -H "Content-Type: application/json" 
+        -H "X-QUME-API-KEY: ${pubkey}" 
+        -H "X-QUME-SIGNATURE: ${sig}" 
+        -H "X-QUME-TIMESTAMP: ${timestamp}" 
+        -H "X-QUME-PASSPHRASE: ${pass}" 
+        -d "$body"
+      ```
+
+
+    # WebSockets
+
+    > Subscribe to real-time data streams (“topics”)
+
+    ## Subscribe
+
+     To subscribe to a topic, simply open a websocket connection to ```wss://websocket.qume.io/public``` then send a message specifying the desired topic. 
+
+      - *Example subscription message*: ```{ "topic" : "l2/BTCUSDQ" }```
+        
+      To unsubscribe, simply close the websocket connection.
+
+    ## Topics
+
+    ### Level-1 (Ticker)
+
+    Publishes a message every time a new trade occurs.
+
+
+    *Topic Name:* ```l1/BTCUSDQ```
+
+
+    Example message:
+
+      ```
+      {
+        "TopicName": "l1/BTCUSDQ",
+        "Message": {
+          "Symbol": "BTCUSDQ",
+          "Qty": 4,
+          "Price": 25954,
+          "Ts": {
+            "seconds": 1552098314,
+            "nanos": 834534238
+          }
+        }
+      }
+      ```
+
+
+    ### Level-2 (Orderbook)
+
+    Publishes a new message when the order book changes.  Each message contains
+    the top-50 price levels on each side of the order book.
+
+
+    *Topic name*: ```l2/BTCUSDQ```
+
+
+    Example message:
+
+      ```
+      {
+        "TopicName": "l2/BTCUSDQ",
+        "Message": {
+          "MarketId": "BTCUSDQ",
+          "Buys": [{"Price" : 300, "Size" : 1}, ...],
+          "Sells": [{"Price" : 310, "Size" : 4}, ...]
+        }
+      }
+      ```
+
+
+    ### Market Statistics
+
+    Streams various market statistics.
+
+
+    *Topic name*: ```stats/BTCUSDQ```
+
+
+    Example message:
+
+      ```
+      {
+        "TopicName": "stats/BTCUSDQ",
+        "Message": {
+          "Symbol": "BTCUSDQ",
+          "Price": 300,
+          "High": 350,
+          "Low": 250,
+          "Change": 25,
+          "Volume": 2
+        }
+      }
+      ```
+  license:
+    name: MIT
+    url: 'https://github.com/apiaryio/polls-api/blob/master/LICENSE'
+host: api.qume.io
+schemes:
+  - https
+consumes:
+  - application/json
+produces:
+  - application/json
+basePath: /v1
+paths:
+  /instruments:
+    get:
+      summary: GET - Returns all available instruments
+      operationId: GetAllMarketStats
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/orderbookGetAllMarketStatsResponse'
+      tags:
+        - instruments
+  '/instruments/{symbol}':
+    get:
+      summary: GET - Returns market statistics for a given symbol
+      operationId: GetMarket
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/marketGetMarketResponse'
+      parameters:
+        - name: symbol
+          description: Contract symbol (i.e. BTCUSDQ)
+          in: path
+          required: true
+          type: string
+      tags:
+        - instruments
+  '/instruments/{symbol}/fundingRate':
+    get:
+      summary: GET - Returns the instantaneous funding rate for a given symbol
+      operationId: GetFundingRate
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/pricesGetFundingRateResponse'
+      parameters:
+        - name: symbol
+          description: Contract symbol (i.e. BTCUSDQ)
+          in: path
+          required: true
+          type: string
+      tags:
+        - instruments
+  '/instruments/{symbol}/orderbook':
+    get:
+      summary: GET - Returns the current order book for a given symbol
+      operationId: GetOrdersForMarket
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/orderbookGetOrdersForMarketResponse'
+      parameters:
+        - name: symbol
+          description: Contract symbol (i.e. BTCUSDQ)
+          in: path
+          required: true
+          type: string
+      tags:
+        - instruments
+  /orders:
+    get:
+      summary: GET - Returns all your active orders
+      operationId: GetOrdersForUser
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/orderbookOrdersForUserResponse'
+      tags:
+        - orders
+    post:
+      summary: POST - Places an order
+      operationId: AddOrder
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/orderbookAddOrderResponse'
+      parameters:
+        - name: payload
+          description: Order fields
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/orderbookAddOrderRequest'
+      tags:
+        - orders
+  '/orders/{orderId}':
+    get:
+      summary: GET - Returns the status of a given order
+      operationId: GetOrder
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/orderbookGetOrderResponse'
+      parameters:
+        - name: orderId
+          description: The unique ID of the order
+          in: path
+          required: true
+          type: string
+      tags:
+        - orders
+    delete:
+      summary: DELETE - Cancels an active order
+      operationId: CancelOrder
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/orderbookCancelOrderResponse'
+      parameters:
+        - name: orderId
+          description: The unique ID of the order
+          in: path
+          required: true
+          type: string
+      tags:
+        - Order Book
+  /trades:
+    get:
+      summary: GET - Returns all historical trades for user
+      operationId: GetTradesForUser
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/orderbookTradesForUserResponse'
+      tags:
+        - trades
+  '/positions/{symbol}/leverage':
+    put:
+      summary: PUT - Sets the leverage for a given position
+      operationId: LeverageSet
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/orderbookLeverageSetResponse'
+      parameters:
+        - name: symbol
+          description: >-
+            Contract symbol for the market within which the user holds an
+            isolated margin position
+          in: path
+          required: true
+          type: string
+        - name: body
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/orderbookLeverageSetRequest'
+      tags:
+        - positions
+  /wallets:
+    get:
+      summary: GET - Returns all your wallets
+      operationId: GetWallets
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/walletWallets'
+      tags:
+        - wallets
+  '/wallets/{asset}':
+    get:
+      summary: GET - Returns your wallet balance for a given asset
+      operationId: GetWalletByUser
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/walletWalletState'
+      parameters:
+        - name: asset
+          description: The name of the asset (i.e. BTC)
+          in: path
+          required: true
+          type: string
+      tags:
+        - wallets
+  '/wallets/{asset}/positions':
+    get:
+      summary: GET - Returns all positions for which you posted margin in a given asset
+      operationId: GetPositionsByUser
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/walletGetPositionsResponse'
+      parameters:
+        - name: asset
+          description: The name of the asset (i.e. BTC)
+          in: path
+          required: true
+          type: string
+      tags:
+        - wallets
+  '/instruments/{symbol}/indexPrice':
+    get:
+      summary: GET - Returns the index price for a given symbol
+      operationId: GetCurrentIndexPrice
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/pricesGetCurrentIndexPriceResponse'
+      parameters:
+        - name: symbol
+          description: Contract symbol (i.e. BTCUSDQ)
+          in: path
+          required: true
+          type: string
+      tags:
+        - instruments
+  '/instruments/{symbol}/markPrice':
+    get:
+      summary: GET - Returns the mark price for a given symbol
+      operationId: GetCurrentMarkPrice
+      responses:
+        '200':
+          description: ''
+          schema:
+            $ref: '#/definitions/pricesGetCurrentMarkPriceResponse'
+      parameters:
+        - name: symbol
+          description: Contract symbol (i.e. BTCUSDQ)
+          in: path
+          required: true
+          type: string
+      tags:
+        - instruments
+definitions:
+  orderbookMarketStats:
+    type: object
+    properties:
+      marketId:
+        type: string
+      price:
+        type: string
+      high:
+        type: string
+      low:
+        type: string
+      change:
+        type: string
+      volume:
+        type: string
+  pricesGetCurrentIndexPriceResponse:
+    type: object
+    properties:
+      indexPrice:
+        type: number
+        format: double
+  pricesGetCurrentMarkPriceResponse:
+    type: object
+    properties:
+      markPrice:
+        type: number
+        format: double
+  orderbookGetAllMarketStatsResponse:
+    type: object
+    properties:
+      marketStats:
+        type: array
+        items:
+          $ref: '#/definitions/orderbookMarketStats'
+  marketGetMarketResponse:
+    type: object
+    properties:
+      market:
+        $ref: '#/definitions/marketMarket'
+  marketMarket:
+    type: object
+    properties:
+      marketId:
+        type: string
+      marketName:
+        type: string
+      baseAsset:
+        type: string
+      quoteAsset:
+        type: string
+  pricesGetFundingRateResponse:
+    type: object
+    properties:
+      fundingRate:
+        $ref: '#/definitions/pricesValueWithTs'
+  pricesValueWithTs:
+    type: object
+    properties:
+      value:
+        type: number
+        format: double
+      timestampNs:
+        type: string
+        format: int64
+  orderbookGetOrdersForMarketResponse:
+    type: object
+    properties:
+      status:
+        $ref: '#/definitions/orderbookGetOrdersForMarketResponseErrorCode'
+      orders:
+        type: array
+        items:
+          $ref: '#/definitions/orderbookOrder'
+  orderbookOrdersForUserResponse:
+    type: object
+    properties:
+      status:
+        $ref: '#/definitions/orderbookOrdersForUserResponseErrorCode'
+      orders:
+        type: array
+        items:
+          $ref: '#/definitions/orderbookOrder'
+  orderbookOrdersForUserResponseErrorCode:
+    type: string
+    enum:
+      - OK
+    default: _unused_
+  orderbookOrderType:
+    type: string
+    enum:
+      - LIMIT
+      - STOP_LIMIT
+      - MARKET
+      - STOP_MARKET
+    default: _OrderType_unused_
+  orderbookSide:
+    type: string
+    enum:
+      - BUY
+      - SELL
+    default: _Side_unused_
+  orderbookStopOrderTrigger:
+    type: string
+    enum:
+      - MARK_PRICE
+      - INDEX_PRICE
+      - LAST_TRADE
+    default: _StopOrderTrigger_unused_
+  orderbookTimeInForce:
+    type: string
+    enum:
+      - UNTIL_CANCEL
+      - FILL_OR_KILL
+      - IMMEDIATE_OR_CANCEL
+    default: _TimeInForce_unused_
+  orderbookOrder:
+    type: object
+    properties:
+      ts:
+        type: string
+        format: date-time
+      id:
+        type: string
+        format: uint64
+      price:
+        type: string
+        format: uint64
+      qty:
+        type: string
+        format: uint64
+        description: |-
+          Remaining unfilled quantity of order. For an order_new action, this
+          value always equals the original placed quantity: if the order
+          is partially/completely filled immediately, a subsequent
+          order_change/order_delete action will be included in the same
+          OrderbookUpdate indicating the order's resting state.
+      userId:
+        type: string
+      asset:
+        type: string
+      symbol:
+        type: string
+      side:
+        $ref: '#/definitions/orderbookSide'
+      originalQty:
+        type: string
+        format: uint64
+      type:
+        $ref: '#/definitions/orderbookOrderType'
+      timeInForce:
+        $ref: '#/definitions/orderbookTimeInForce'
+      postOnly:
+        type: boolean
+        format: boolean
+      triggerType:
+        $ref: '#/definitions/orderbookStopOrderTrigger'
+        title: >-
+          price and trigger to be used for placing an order in the other side of
+          the book when type is STOP_LIMIT or STOP_MARKET
+      triggerPrice:
+        type: string
+        format: uint64
+  orderbookGetOrderResponse:
+    type: object
+    properties:
+      status:
+        $ref: '#/definitions/orderbookGetOrderResponseErrorCode'
+      order:
+        $ref: '#/definitions/orderbookOrder'
+  orderbookGetOrderResponseErrorCode:
+    type: string
+    enum:
+      - OK
+    default: _unused_
+  orderbookTradesForUserResponse:
+    type: object
+    properties:
+      status:
+        $ref: '#/definitions/orderbookTradesForUserResponseErrorCode'
+      trades:
+        type: array
+        items:
+          $ref: '#/definitions/orderbookTrade'
+  orderbookTradesForUserResponseErrorCode:
+    type: string
+    enum:
+      - OK
+    default: _unused_
+  orderbookGetOrdersForMarketResponseErrorCode:
+    type: string
+    enum:
+      - OK
+    default: _unused_
+  orderbookTrade:
+    type: object
+    properties:
+      symbol:
+        type: string
+      makerside:
+        $ref: '#/definitions/orderbookSide'
+      makerOrderId:
+        type: string
+        format: uint64
+      takerOrderId:
+        type: string
+        format: uint64
+      price:
+        type: string
+        format: uint64
+      qty:
+        type: string
+        format: uint64
+      ts:
+        type: string
+        format: date-time
+      id:
+        type: string
+        format: uint64
+  orderbookAddOrderResponse:
+    type: object
+    properties:
+      orderId:
+        type: string
+        format: uint64
+  orderbookCancelOrderResponse:
+    type: object
+  orderbookLeverageSetResponse:
+    type: object
+  orderbookAddOrderRequest:
+    type: object
+    properties:
+      symbol:
+        type: string
+      side:
+        $ref: '#/definitions/orderbookSide'
+      price:
+        type: string
+        format: uint64
+      qty:
+        type: string
+        format: uint64
+      userId:
+        type: string
+      type:
+        $ref: '#/definitions/orderbookOrderType'
+      timeInForce:
+        $ref: '#/definitions/orderbookTimeInForce'
+      postOnly:
+        type: boolean
+        format: boolean
+      triggerType:
+        $ref: '#/definitions/orderbookStopOrderTrigger'
+      triggerPrice:
+        type: string
+        format: uint64
+  orderbookLeverageSetRequest:
+    type: object
+    properties:
+      portfolio:
+        type: string
+        title: |-
+          must be an isolated margin position, so the name is the same as that
+          of the associated orderbook
+      leverage:
+        type: number
+        format: double
+  walletWallets:
+    type: object
+    properties:
+      wallets:
+        type: array
+        items:
+          $ref: '#/definitions/walletWalletSummary'
+        title: The IDs of all wallets associated with requested user
+  walletWalletSummary:
+    type: object
+    properties:
+      walletId:
+        type: string
+      asset:
+        type: string
+  walletWalletState:
+    type: object
+    properties:
+      owner:
+        type: string
+        title: The owner of this wallet
+      availableBalance:
+        type: string
+        title: |-
+          The available (i.e. for withdrawal/trading) balance in this
+          wallet
+      balance:
+        type: string
+        title: |-
+          The total balance in this wallet, including funds that are in the
+          process of being transferred
+      asset:
+        type: string
+        title: 'The asset (e.g., ETH) this wallet contains'
+      addresses:
+        type: array
+        items:
+          type: string
+        title: The addresses available for deposit
+      orderMargin:
+        type: string
+        title: reserved value
+      fee:
+        type: string
+        title: fee value
+      positions:
+        type: array
+        items:
+          type: string
+        title: leverage
+      enabled:
+        type: boolean
+        format: boolean
+        title: is it enabled?
+      leverage:
+        type: string
+        title: current leverage
+  walletGetPositionsResponse:
+    type: object
+    properties:
+      positions:
+        type: array
+        items:
+          $ref: '#/definitions/walletPositionMap'
+  walletPositionMap:
+    type: object
+    properties:
+      instrumentId:
+        type: string
+      position:
+        $ref: '#/definitions/walletPosition'
+  walletPosition:
+    type: object
+    properties:
+      id:
+        type: string
+      contract:
+        $ref: '#/definitions/walletContract'
+      orderMargin:
+        type: string
+      initialMargin:
+        type: string
+      size:
+        type: string
+      entryValue:
+        type: string
+  walletContract:
+    type: object
+    properties:
+      id:
+        type: string
+      initialMargin:
+        type: number
+        format: double
+      maintenanceMargin:
+        type: number
+        format: double
+      notional:
+        type: string
